@@ -2,8 +2,11 @@ name: Bilibili Data Pipeline Auto-Update
 
 # 触发条件配置
 on:
+  push:
+    branches:
+      - main  # 只要主分支有代码更新，立刻自动触发一次（强制唤醒）
   schedule:
-    # 定时任务：每小时0分运行一次
+    # 定时任务：每小时15分运行一次
     # 注意：GitHub 服务器使用 UTC 时间，北京时间减去 8 小时即为 UTC 时间
     - cron: '15 * * * *'  
   workflow_dispatch: # 这个配置允许你在 GitHub 网页上点击按钮手动触发运行
