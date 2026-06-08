@@ -52,6 +52,6 @@ jobs:
           if git diff-index --quiet HEAD --; then
             echo "没有检测到数据变动，跳过推送。"
           else
-            git commit -m " Auto-update Bilibili ranking data [skip ci]"
+            git commit -m " Auto-update Bilibili ranking data"
             git push
           fi
