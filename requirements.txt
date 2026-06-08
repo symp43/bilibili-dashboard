@@ -5,3 +5,4 @@ plotly>=5.18.0
 matplotlib>=3.8.0
 jieba==0.42.1
 wordcloud==1.9.3
+requests>=2.31.0
