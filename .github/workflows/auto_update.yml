@@ -5,9 +5,17 @@ on:
     - cron: '15 * * * *'
   workflow_dispatch:
 
+# 1. 授予写入权限，以便 bot 可以推送提交
+permissions:
+  contents: write
+
 jobs:
   scrape_and_clean:
     runs-on: ubuntu-latest
+    
+    # 2. 屏蔽 Node.js 20 弃用警告并强制使用 Node 24
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout Repository
@@ -21,7 +29,7 @@ jobs:
           python-version: '3.12'
 
       - name: Cache pip
-        uses: actions/cache@v3
+        uses: actions/cache@v4 # 升级到 v4 版本
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
