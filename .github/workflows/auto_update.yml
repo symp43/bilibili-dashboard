@@ -1,0 +1,57 @@
+name: Bilibili Data Pipeline Auto-Update
+
+# 触发条件配置
+on:
+  schedule:
+    # 定时任务：每小时0分运行一次
+    # 注意：GitHub 服务器使用 UTC 时间，北京时间减去 8 小时即为 UTC 时间
+    - cron: '0 * * * *'  
+  workflow_dispatch: # 这个配置允许你在 GitHub 网页上点击按钮手动触发运行
+
+# 任务定义
+jobs:
+  scrape_and_clean:
+    runs-on: ubuntu-latest # 使用最新版的 Linux 云服务器
+
+    steps:
+      # 1. 把你的代码仓库拉取到云服务器上
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. 在云服务器上安装 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. 安装在requirements.txt 里写的依赖库
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. 运行爬虫脚本，抓取最新数据存入 data/raw
+      - name: Run Scraper
+        run: python scraper.py
+
+      # 5. 运行清洗脚本，合并生成最新的 cleaned_bilibili_ranking.csv
+      - name: Run Data Cleaning
+        run: python data_cleaning.py
+
+      # 6. 把新生成的数据自动提交（Commit）并推送到（Push）你的 GitHub 仓库
+      - name: Commit and Push changes
+        run: |
+          # 配置云端机器人的 Git 身份
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # 将 data 文件夹下的所有变动添加到暂存区
+          git add data/
+          
+          # 检查是否有文件变动，如果有则提交并推送；如果没有变动则跳过，防止报错
+          if git diff-index --quiet HEAD --; then
+            echo "没有检测到数据变动，跳过推送。"
+          else
+            git commit -m " Auto-update Bilibili ranking data [skip ci]"
+            git push
+          fi
