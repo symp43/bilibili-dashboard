@@ -106,7 +106,7 @@ def render_wordcloud(freq, ax=None):
     if not freq or not WORDCLOUD_AVAILABLE:
         return None
     wc = WordCloud(
-        font_path="C:/Windows/Fonts/msyh.ttc",
+        font_path="msyh.ttc",
         width=800, height=400, background_color="white",
         max_words=80, colormap="viridis", prefer_horizontal=0.7,
     )
