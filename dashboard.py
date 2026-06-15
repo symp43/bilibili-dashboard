@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
 matplotlib.rcParams["axes.unicode_minus"] = False
 import matplotlib.pyplot as plt
@@ -19,12 +20,14 @@ import streamlit as st
 # --- 可选依赖 ---
 try:
     import jieba
+
     JIEBA_AVAILABLE = True
 except ImportError:
     JIEBA_AVAILABLE = False
 
 try:
     from wordcloud import WordCloud
+
     WORDCLOUD_AVAILABLE = True
 except ImportError:
     WORDCLOUD_AVAILABLE = False
@@ -106,7 +109,7 @@ def render_wordcloud(freq, ax=None):
     if not freq or not WORDCLOUD_AVAILABLE:
         return None
     wc = WordCloud(
-        font_path="msyh.ttc",
+        font_path="C:/Windows/Fonts/msyh.ttc",
         width=800, height=400, background_color="white",
         max_words=80, colormap="viridis", prefer_horizontal=0.7,
     )
@@ -131,7 +134,8 @@ if "rank_date" in df.columns and df["rank_date"].notna().any():
     date_range = st.sidebar.date_input("日期范围", value=(min_date, max_date), min_value=min_date, max_value=max_date)
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
-        df_filtered = df[(df["rank_date"] >= pd.Timestamp(start_date)) & (df["rank_date"] <= pd.Timestamp(end_date))].copy()
+        df_filtered = df[
+            (df["rank_date"] >= pd.Timestamp(start_date)) & (df["rank_date"] <= pd.Timestamp(end_date))].copy()
     else:
         df_filtered = df.copy()
 else:
@@ -162,8 +166,8 @@ if not show_anomaly and "anomaly_flag" in df_filtered.columns:
 
 st.sidebar.caption(f"当前筛选: {len(df_filtered)} 条数据")
 
-# v2: 模块1-3用去重后数据（每个视频只保留最新快照）
-df_latest = df_filtered.sort_values("snapshot_time").groupby("bvid", as_index=False).last()
+# 去重后数据（每个视频只保留最新快照）
+df_latest = df_filtered.sort_values("snapshot_time", na_position="first").groupby("bvid", as_index=False).last()
 
 # ====== KPI 卡片 ======
 st.markdown("---")
@@ -177,25 +181,43 @@ metrics = [
 ]
 for col, (label, value) in zip(cols, metrics):
     with col:
-        st.markdown(f'<div class="metric-card"><div class="metric-value">{value}</div><div class="metric-label">{label}</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="metric-card"><div class="metric-value">{value}</div><div class="metric-label">{label}</div></div>',
+            unsafe_allow_html=True)
 
-# ====== 模块1：大盘宏观追踪 ======
+# ====== 模块1：大盘宏观追踪 (优化版) ======
 st.markdown("---")
-st.subheader(" 模块一：大盘宏观追踪 — 各一级分区每日上榜视频数量趋势")
+st.subheader(" 模块一：大盘宏观追踪 — 各分区分布与趋势")
 
 if len(df_latest) > 0 and "rank_date" in df_latest.columns:
     trend_df = compute_category_trends(df_latest)
-    tab1, tab2 = st.tabs([" 堆叠面积图", " 数据表"])
+    tab1, tab2, tab3 = st.tabs([" 趋势折线图", " 分布矩形树图", " 数据表"])
+
     with tab1:
+        # 将堆叠面积图更换为直观的折线图，避免相互遮挡与颜色混乱
         pivot = trend_df.pivot_table(index="rank_date", columns="main_category", values="count", fill_value=0)
         if not pivot.empty:
-            fig_area = px.area(pivot, title="各一级分区每日上榜视频数量趋势",
-                               labels={"value": "上榜数量", "variable": "一级分区", "rank_date": "日期"})
-            fig_area.update_layout(height=400, hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig_area, use_container_width=True)
+            fig_line = px.line(pivot, title="各一级分区每日上榜视频数量趋势",
+                               labels={"value": "上榜数量", "variable": "一级分区", "rank_date": "日期"},
+                               markers=True)
+            fig_line.update_layout(height=450, hovermode="x unified",
+                                   legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(fig_line, use_container_width=True)
         else:
             st.info("无趋势数据。")
+
     with tab2:
+        # 新增矩形树图：清晰展示选择的分区在当前大盘的整体占比
+        cat_counts = df_latest[cat_col].value_counts().reset_index()
+        cat_counts.columns = [cat_col, "count"]
+        fig_tree = px.treemap(cat_counts, path=[cat_col], values="count",
+                              title="各一级分区上榜视频总数结构分布",
+                              color="count", color_continuous_scale="blues")
+        fig_tree.update_traces(textinfo="label+value+percent root")
+        fig_tree.update_layout(height=450)
+        st.plotly_chart(fig_tree, use_container_width=True)
+
+    with tab3:
         st.dataframe(pivot.reset_index() if not pivot.empty else trend_df, use_container_width=True)
 else:
     st.info("数据不足。")
@@ -228,9 +250,11 @@ if len(df_latest) > 0 and "engage_rate" in df_latest.columns:
 
     st.markdown("** 宝藏视频 Top 10**")
     low_view = df_latest["view_count"].median()
-    treasure = df_latest[(df_latest["view_count"] < low_view) & (df_latest["engage_rate"].notna())].nlargest(10, "engage_rate")
+    treasure = df_latest[(df_latest["view_count"] < low_view) & (df_latest["engage_rate"].notna())].nlargest(10,
+                                                                                                             "engage_rate")
     if not treasure.empty:
-        show_cols = ["rank_position", "title", "author", cat_col, "category", "view_count", "engage_rate", "hardcore_index", "duration_bucket"]
+        show_cols = ["rank_position", "title", "author", cat_col, "category", "view_count", "engage_rate",
+                     "hardcore_index", "duration_bucket"]
         show_cols = [c for c in show_cols if c in treasure.columns]
         st.dataframe(treasure[show_cols], use_container_width=True,
                      column_config={"engage_rate": st.column_config.NumberColumn("互动率", format="%.4f"),
@@ -249,12 +273,14 @@ if len(df_latest) > 0:
     tab_wc, tab_dur = st.tabs([" 标题词云", " 时长分析"])
     with tab_wc:
         if not JIEBA_AVAILABLE:
-            st.warning(" jieba ，pip install jieba")
+            st.warning(" 缺少 jieba 库，请执行 pip install jieba 启用分词功能")
         freq = generate_word_frequencies(df_latest, top_k=80)
         if freq:
-            words_df = pd.DataFrame(list(freq.items())[:30], columns=["word", "count"]).sort_values("count", ascending=True)
+            words_df = pd.DataFrame(list(freq.items())[:30], columns=["word", "count"]).sort_values("count",
+                                                                                                    ascending=True)
             fig_bar_wc = px.bar(words_df, x="count", y="word", orientation="h", title="标题高频词 Top 30",
-                                labels={"count": "出现次数", "word": "关键词"}, color="count", color_continuous_scale="viridis")
+                                labels={"count": "出现次数", "word": "关键词"}, color="count",
+                                color_continuous_scale="viridis")
             fig_bar_wc.update_layout(height=550, yaxis=dict(dtick=1))
             st.plotly_chart(fig_bar_wc, use_container_width=True)
             if WORDCLOUD_AVAILABLE:
@@ -273,12 +299,14 @@ if len(df_latest) > 0:
             col1, col2 = st.columns(2)
             with col1:
                 fig_dur = px.bar(dur_stats, x="duration_bucket", y="avg_views", color="duration_bucket",
-                                 title="各时长区间平均播放量", labels={"duration_bucket": "时长区间", "avg_views": "平均播放量"}, text_auto=",.0f")
+                                 title="各时长区间平均播放量",
+                                 labels={"duration_bucket": "时长区间", "avg_views": "平均播放量"}, text_auto=",.0f")
                 fig_dur.update_layout(showlegend=False, height=400)
                 st.plotly_chart(fig_dur, use_container_width=True)
             with col2:
                 fig_eng = px.bar(dur_stats, x="duration_bucket", y="avg_engage", color="duration_bucket",
-                                 title="各时长区间平均互动率", labels={"duration_bucket": "时长区间", "avg_engage": "平均互动率"}, text_auto=".4f")
+                                 title="各时长区间平均互动率",
+                                 labels={"duration_bucket": "时长区间", "avg_engage": "平均互动率"}, text_auto=".4f")
                 fig_eng.update_layout(showlegend=False, height=400)
                 st.plotly_chart(fig_eng, use_container_width=True)
             st.dataframe(dur_stats, use_container_width=True,
@@ -288,7 +316,7 @@ if len(df_latest) > 0:
         else:
             st.info("无时长数据。")
 
-# ====== 模块4：单视频时序追踪 ======
+# ====== 模块4：单视频时序追踪 (结合搜索功能) ======
 st.markdown("---")
 st.subheader(" 模块四：单视频时序追踪 — 播放量爆发路径与生命周期")
 
@@ -299,82 +327,124 @@ has_timeseries = ("snapshot_seq" in df_filtered.columns and
 if not has_timeseries:
     st.info(" 当前仅 1 期快照，暂无增量时序数据。连续采集 2 次以上后可见时序图表。")
 else:
+    # 汇总各视频基础信息
     video_list = df_filtered.groupby(["bvid", "title", "main_category"]).agg(
         total_views=("view_count", "max"),
         snapshot_count=("snapshot_seq", "max"),
     ).reset_index().sort_values("total_views", ascending=False)
 
-    video_options = video_list["bvid"].tolist()
-    selected_bvid = st.selectbox(
-        " 选择目标视频进行深度下钻",
-        options=video_options,
-        format_func=lambda bv: next(
-            (f"[{r['main_category']}] {r['title'][:50]} ({r['bvid']}) | {int(r['snapshot_count'])}期"
-             for _, r in video_list.iterrows() if r["bvid"] == bv),
-            bv,
-        ),
-        index=0,
-    )
+    # 1. 提供搜索输入框
+    search_kw = st.text_input(" 搜索要追踪的视频（输入标题关键词 或 BVID进行检索）", "")
 
-    video_df = df_filtered[df_filtered["bvid"] == selected_bvid].sort_values("snapshot_time")
-    video_title = video_df["title"].iloc[0]
-    video_author = video_df["author"].iloc[0]
-
-    if len(video_df) < 2:
-        st.warning(f" 「{video_title}」仅 1 期快照，暂无增量。")
+    # 2. 根据输入关键字进行模糊过滤
+    if search_kw.strip():
+        mask = video_list["title"].str.contains(search_kw, case=False, na=False) | \
+               video_list["bvid"].str.contains(search_kw, case=False, na=False)
+        filtered_video_list = video_list[mask]
     else:
-        st.markdown(f"** {video_title}** — {video_author}")
+        filtered_video_list = video_list
 
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    # 3. 生成下拉列表以备选择
+    if filtered_video_list.empty:
+        st.warning("未找到匹配的视频，请尝试其他搜索词！")
+    else:
+        video_options = filtered_video_list["bvid"].tolist()
 
-        peak_v = video_df["peak_velocity"].iloc[0]
-        peak_time = video_df.loc[video_df["delta_views"].idxmax(), "snapshot_time"]
-        peak_time_str = pd.Timestamp(peak_time).strftime("%m-%d %H:%M") if pd.notna(peak_time) else "-"
-
-        total_growth = video_df["view_count"].iloc[-1] - video_df["view_count"].iloc[0]
-        first_engage = video_df["engage_rate"].iloc[0]
-        last_engage = video_df["engage_rate"].iloc[-1]
-        engage_change = last_engage - first_engage
-
-        with kpi1:
-            st.metric(" 峰值流速", f"{peak_v:,}", delta=f"@{peak_time_str}" if peak_v > 0 else None)
-        with kpi2:
-            st.metric(" 上榜总涨幅", f"{total_growth:,}")
-        with kpi3:
-            st.metric(" 初期互动率", f"{first_engage:.4f}")
-        with kpi4:
-            st.metric(" 互动衰减", f"{engage_change:+.4f}",
-                      delta_color="inverse" if engage_change < 0 else "normal")
-
-        # 折线图：累计播放量增长路径
-        fig_line = px.line(
-            video_df, x="snapshot_time", y="view_count",
-            title=f"「{video_title[:40]}」播放量增长路径",
-            labels={"snapshot_time": "快照时间", "view_count": "累计播放量"},
-            markers=True,
+        # 使用下拉框呈现过滤后的选项，让用户最终确认所选视频
+        selected_bvid = st.selectbox(
+            "选择目标视频进行深度下钻:",
+            options=video_options,
+            format_func=lambda bv: next(
+                (f"[{r['main_category']}] {r['title'][:50]}... ({r['bvid']}) | 记录{int(r['snapshot_count'])}期"
+                 for _, r in filtered_video_list.iterrows() if r["bvid"] == bv),
+                bv,
+            ),
+            index=0,
         )
-        fig_line.update_traces(line=dict(color="#fb7299", width=3), marker=dict(size=8))
-        fig_line.update_layout(height=400, hovermode="x unified")
-        st.plotly_chart(fig_line, use_container_width=True)
 
-        with st.expander(" 查看逐期增量详情"):
-            detail_cols = ["snapshot_time", "view_count", "delta_views", "delta_likes",
-                           "delta_coins", "engage_rate", "engagement_decay", "rank_position"]
-            detail_cols = [c for c in detail_cols if c in video_df.columns]
-            st.dataframe(
-                video_df[detail_cols].reset_index(drop=True),
-                use_container_width=True,
-                column_config={
-                    "snapshot_time": st.column_config.DatetimeColumn("快照时间", format="MM-DD HH:mm"),
-                    "view_count": st.column_config.NumberColumn("累计播放", format="%,d"),
-                    "delta_views": st.column_config.NumberColumn("新增播放", format="%,d"),
-                    "delta_likes": st.column_config.NumberColumn("新增点赞", format="%,d"),
-                    "delta_coins": st.column_config.NumberColumn("新增投币", format="%,d"),
-                    "engage_rate": st.column_config.NumberColumn("互动率", format="%.4f"),
-                    "engagement_decay": st.column_config.NumberColumn("互动衰减", format="%.4f"),
-                    "rank_position": st.column_config.NumberColumn("排名", format="d"),
-                },
-            )
+        # 4. 展示目标视频的下钻图表
+        video_df = df_filtered[df_filtered["bvid"] == selected_bvid].sort_values("snapshot_time", na_position="first")
+        video_title = video_df["title"].iloc[0]
+        video_author = video_df["author"].iloc[0]
+
+        if len(video_df) < 2:
+            st.warning(f" 「{video_title}」仅 1 期快照，暂无增量。")
+        else:
+            st.markdown(f"** {video_title}** — {video_author}")
+
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+            peak_v = video_df["peak_velocity"].iloc[0]
+            peak_time = video_df.loc[video_df["delta_views"].idxmax(), "snapshot_time"]
+            peak_time_str = pd.Timestamp(peak_time).strftime("%m-%d %H:%M") if pd.notna(peak_time) else "-"
+
+            total_growth = video_df["view_count"].iloc[-1] - video_df["view_count"].iloc[0]
+            first_engage = video_df["engage_rate"].iloc[0]
+            last_engage = video_df["engage_rate"].iloc[-1]
+            engage_change = last_engage - first_engage
+
+            with kpi1:
+                st.metric(" 峰值流速", f"{peak_v:,}", delta=f"@{peak_time_str}" if peak_v > 0 else None)
+            with kpi2:
+                st.metric(" 上榜总涨幅", f"{total_growth:,}")
+            with kpi3:
+                st.metric(" 初期互动率", f"{first_engage:.4f}")
+            with kpi4:
+                st.metric(" 互动衰减", f"{engage_change:+.4f}",
+                          delta_color="inverse" if engage_change < 0 else "normal")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            # 使用左右两列布局：左边看增长趋势，右边看漏斗转化
+            track_col1, track_col2 = st.columns([5, 4])
+
+            with track_col1:
+                # 折线图：累计播放量增长路径
+                fig_line_track = px.line(
+                    video_df, x="snapshot_time", y="view_count",
+                    title=f"「{video_title[:25]}...」播放量增长路径",
+                    labels={"snapshot_time": "快照时间", "view_count": "累计播放量"},
+                    markers=True,
+                )
+                fig_line_track.update_traces(line=dict(color="#fb7299", width=3), marker=dict(size=8))
+                fig_line_track.update_layout(height=380, hovermode="x unified", margin=dict(l=0, r=0, t=50, b=0))
+                st.plotly_chart(fig_line_track, use_container_width=True)
+
+            with track_col2:
+                # 漏斗图：提取该视频最后一次快照(最新)的累计数据
+                latest_stats = video_df.iloc[-1]
+                funnel_data = pd.DataFrame([
+                    dict(阶段="播放量", 数量=latest_stats.get("view_count", 0)),
+                    dict(阶段="点赞量", 数量=latest_stats.get("like_count", 0)),
+                    dict(阶段="投币量", 数量=latest_stats.get("coin_count", 0)),  # B站特色数据，也一并加上
+                    dict(阶段="收藏量", 数量=latest_stats.get("favorite_count", 0)),
+                    dict(阶段="转发量", 数量=latest_stats.get("share_count", 0))
+                ])
+                fig_single_funnel = px.funnel(
+                    funnel_data, x='数量', y='阶段',
+                    title="当前视频最新累计数据漏斗"
+                )
+                fig_single_funnel.update_traces(textinfo="value+percent initial", marker=dict(line=dict(width=0)))
+                fig_single_funnel.update_layout(height=380, margin=dict(l=0, r=0, t=50, b=0))
+                st.plotly_chart(fig_single_funnel, use_container_width=True)
+
+            with st.expander(" 查看逐期增量详情"):
+                detail_cols = ["snapshot_time", "view_count", "delta_views", "delta_likes",
+                               "delta_coins", "engage_rate", "engagement_decay", "rank_position"]
+                detail_cols = [c for c in detail_cols if c in video_df.columns]
+                st.dataframe(
+                    video_df[detail_cols].reset_index(drop=True),
+                    use_container_width=True,
+                    column_config={
+                        "snapshot_time": st.column_config.DatetimeColumn("快照时间", format="MM-DD HH:mm"),
+                        "view_count": st.column_config.NumberColumn("累计播放", format="%,d"),
+                        "delta_views": st.column_config.NumberColumn("新增播放", format="%,d"),
+                        "delta_likes": st.column_config.NumberColumn("新增点赞", format="%,d"),
+                        "delta_coins": st.column_config.NumberColumn("新增投币", format="%,d"),
+                        "engage_rate": st.column_config.NumberColumn("互动率", format="%.4f"),
+                        "engagement_decay": st.column_config.NumberColumn("互动衰减", format="%.4f"),
+                        "rank_position": st.column_config.NumberColumn("排名", format="d"),
+                    },
+                )
 
 # ====== 原始数据 ======
 st.markdown("---")
