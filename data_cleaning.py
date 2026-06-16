@@ -1,7 +1,7 @@
 """
-B站热榜数据清洗与指标计算 (ETL v2)
+B站热榜数据清洗与指标计算 (ETL v2.1)
 读取 raw/*.csv -> 清洗 -> 衍生指标计算 -> 输出 cleaned_bilibili_ranking.csv
-v2: 新增时间序列面板数据处理，支持 snapshot_time、差分增量指标。
+v2.1: 新增 pubdate 发布时间解析与时序生命周期（已发布时长）指标计算。
 """
 
 import re
@@ -94,12 +94,12 @@ def load_raw_csvs(raw_dir: Path) -> pd.DataFrame:
         raise ValueError("未能加载任何有效 CSV")
     df = pd.concat(dfs, ignore_index=True)
 
-    # v2: 兼容旧 CSV 无 snapshot_time 列
+    # 兼容旧 CSV 无 snapshot_time 列
     if "snapshot_time" not in df.columns:
         print("  旧 CSV 兼容: 从 rank_date 生成 snapshot_time")
         df["snapshot_time"] = df["rank_date"].astype(str) + " 00:00:00"
 
-    # v2: 按 [bvid, snapshot_time] 去重（保留每次快照）
+    # 按 [bvid, snapshot_time] 去重（保留每次快照）
     df["snapshot_time"] = pd.to_datetime(df["snapshot_time"])
     df = df.drop_duplicates(subset=["bvid", "snapshot_time"], keep="last")
     return df
@@ -142,10 +142,30 @@ def clean_and_enrich(df: pd.DataFrame) -> pd.DataFrame:
 
     df["rank_position"] = pd.to_numeric(df["rank_position"], errors="coerce").fillna(0).astype("int64")
 
-    # --- 4. snapshot_time 类型 ---
-    df["snapshot_time"] = pd.to_datetime(df["snapshot_time"])
+    # --- 4. 时间字段处理 (snapshot_time & pubdate) ---
+    df["snapshot_time"] = pd.to_datetime(df["snapshot_time"], errors="coerce")
 
-    # --- 5. 时序排序（v2: 全局按 bvid + snapshot_time 升序）---
+    if "pubdate" in df.columns:
+        # B站API的pubdate通常为10位时间戳，但也可能被存为日期字符串
+        # 统一处理：尝试当做时间戳(秒)解析，如果报错则当做字符串解析
+        def parse_pubdate(s):
+            if pd.isna(s): return pd.NaT
+            try:
+                # 尝试转为浮点数并解析为 Unix 时间戳
+                ts = float(s)
+                # 转换为东八区时间，并去除时区后缀(tz_naive)以便与 snapshot_time 计算
+                dt = pd.to_datetime(ts, unit='s', origin='unix')
+                return dt.tz_localize('UTC').tz_convert('Asia/Shanghai').tz_localize(None)
+            except ValueError:
+                # 若抛出异常，说明已经是标准日期字符串格式，直接转换
+                return pd.to_datetime(s, errors="coerce")
+
+        df["pubdate"] = df["pubdate"].apply(parse_pubdate)
+    else:
+        print("  ⚠️ 警告: 原始数据中未找到 pubdate 列，已填充空值")
+        df["pubdate"] = pd.NaT
+
+    # --- 5. 时序排序（全局按 bvid + snapshot_time 升序）---
     df = df.sort_values(["bvid", "snapshot_time"]).reset_index(drop=True)
 
     # --- 6. 异常值标记 ---
@@ -157,7 +177,7 @@ def clean_and_enrich(df: pd.DataFrame) -> pd.DataFrame:
     if anomaly_count > 0:
         print(f"  标记异常数据: {anomaly_count} 条")
 
-    # --- 7. 衍生业务指标 ---
+    # --- 7. 衍生业务指标计算 ---
     # 三连互动率
     df["engage_rate"] = np.where(
         df["view_count"] > 0,
@@ -177,7 +197,16 @@ def clean_and_enrich(df: pd.DataFrame) -> pd.DataFrame:
         np.nan,
     )
 
-    # --- 8. v2: 时序差分指标（按 bvid 分组计算）---
+    # 👉 新增指标：已发布时长（生命周期，精确到小时）
+    if "pubdate" in df.columns:
+        # snapshot_time 减去 pubdate，转换为小时
+        df["hours_since_pub"] = (df["snapshot_time"] - df["pubdate"]).dt.total_seconds() / 3600.0
+        # 避免脏数据导致负数时间，并保留两位小数
+        df["hours_since_pub"] = df["hours_since_pub"].clip(lower=0).round(2)
+    else:
+        df["hours_since_pub"] = np.nan
+
+    # --- 8. 时序差分指标（按 bvid 分组计算）---
     # 标记每个 bvid 组内的序号
     df["snapshot_seq"] = df.groupby("bvid").cumcount() + 1
 
@@ -242,6 +271,8 @@ def main():
     print(f"视频数: {df_clean['bvid'].nunique()}")
     print(f"平均播放量: {df_clean['view_count'].mean():,.0f}")
     print(f"平均三连互动率: {df_clean['engage_rate'].mean():.4f}")
+    if "hours_since_pub" in df_clean.columns:
+        print(f"平均上榜生命周期: {df_clean['hours_since_pub'].mean():.1f} 小时")
     print(f"异常数据: {(df_clean['anomaly_flag'] != 'normal').sum()}")
 
     if "main_category" in df_clean.columns:
