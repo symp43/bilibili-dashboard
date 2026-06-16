@@ -62,7 +62,7 @@ STOPWORDS = set([
     " ", "\t", "\n", "|", "/",
 ])
 
-
+@st.cache_data(ttl=900)
 def load_data(filepath=None):
     fp = filepath or DEFAULT_FILE
     if not fp.exists():
