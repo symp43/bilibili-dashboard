@@ -307,9 +307,7 @@ elif menu == "单视频时序追踪":
         st.info(" 当前仅 1 期快照，暂无增量时序数据。连续采集 2 次以上后可见时序图表。")
     else:
         video_list = get_video_summary(df_filtered)
-            total_views=("view_count", "max"), snapshot_count=("snapshot_seq", "max"),
-        ).reset_index().sort_values("total_views", ascending=False)
-
+        
         search_kw = st.text_input(" 🔍 搜索要追踪的视频（输入标题关键词 或 BVID）", "")
 
         if search_kw.strip():
