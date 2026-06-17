@@ -182,7 +182,7 @@ st.sidebar.caption(f"当前筛选: {len(df_filtered)} 条数据")
 df_latest = df_filtered.sort_values("snapshot_time", na_position="first").groupby("bvid", as_index=False).last()
 
 # ====== 顶部标题与 KPI ======
-st.markdown(f'<p class="main-header"> B站热榜看板 | {menu.split(" ")[1]}</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="main-header"> 📺 B站热榜看板 | {menu}</p>', unsafe_allow_html=True)
 st.markdown("---")
 
 cols = st.columns(5)
